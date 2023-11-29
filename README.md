@@ -40,7 +40,6 @@ Usage of qtup:
 qtup https://pac.qtserver.local
 ```
 
-
 ```bash
 # 带所有参数
 # 上传 local-image-path目录下 的影像到 https://pac.qtserver.local服务器，最多同时5个影像一起上传，
@@ -48,7 +47,6 @@ qtup https://pac.qtserver.local
 # 输出写入日志文件20231127.log
 qtup --server https://pac.qtserver.local --threads 5 --path-images local-image-path --modality-send gapserver --delete-pac true --logfile=20231127.log 
 ```
-
 
 ```bash
 # 使用环境变量
@@ -72,16 +70,16 @@ qtup
 * 上述参数用法可以混合使用，比如
 
   ```bash
-  # 同时使用了环境变量、.env、参数（长短参数名、server可以省略参数名）
+  # 同时使用了环境变量、.env、参数（长短参数名）
   export SERVER=https://pac-dev.qtserver.local
   cat > .env <<EOF
   SERVER=https://pac-test.qtserver.local
   PATH-IMAGES=Downloads/images
   EOF
-  qtup https://pac.qtserver.local -t 1	 --logfile=./logs/20231127.log
+  qtup -s https://pac.qtserver.local -t 1	 --logfile=./logs/20231127.log
   ```
 * 参数没有顺序
-* server参数值或环境变量必填，server参数可以不写参数名
+* server参数值或环境变量必填，只有server参数时可以不写参数名
 * 优先级：参数>环境变量>.env文件
 * 任何不填写的参数，会检查：
 

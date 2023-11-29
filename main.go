@@ -119,10 +119,10 @@ func uploadFile(server string, filePath string) (patientId string, err error) {
 
 func sentToModality(server string, patientId string) (jobId string, err error) {
 	// 构建 JSON payload
-	patientIds:=[]string{patientId}
+	patientIds := []string{patientId}
 	payload := struct {
 		ID           []string `json:"Resources"`
-		Asynchronous bool   `json:"Asynchronous"`
+		Asynchronous bool     `json:"Asynchronous"`
 	}{
 		ID:           patientIds,
 		Asynchronous: true,
@@ -234,7 +234,9 @@ func main() {
 			if err != nil {
 				continue
 			}
-			for {
+			delayAttempts, maxDelayAttempts := 0, 40
+			stateSuccess := false
+			for ; delayAttempts < maxDelayAttempts; delayAttempts++ {
 				resp, err := http.Get(*server + "/jobs/" + jobId)
 				if err != nil {
 					log.Println("ERROR: 发送到modality的job:", jobId, " 状态检查请求失败: ", err)
@@ -252,33 +254,40 @@ func main() {
 				if !ok {
 					log.Println("ERROR: 发送到modality的job:", jobId, " 找不到State键值")
 				}
+				if jobState == "Failure" {
+					log.Println("ERROR: 发送到modality的job:", jobId, " State 报告失败")
+					break
+				}
 				if jobState == "Success" {
+					stateSuccess = true
 					break
 				}
 
 				// 等待一段时间再发送下一次请求
 				time.Sleep(60 * time.Second)
 			}
+			if !stateSuccess {
+				continue
+			}
 			log.Println("INFO: 成功发送", zipfile, "对应的patientId为", patientId, "的影像到modality ", *modality)
-
 			if *deletePac {
 				log.Println("INFO: 开始删除", zipfile, "对应的patientId为", patientId, "在pac server上的影像")
 				req, err := http.NewRequest("DELETE", *server+"/patients/"+patientId, nil)
 				if err != nil {
-					log.Println("ERROR: 删除patientId为", patientId,"在pac server上的影像时，创建 DELETE 请求失败: ", err)
+					log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，创建 DELETE 请求失败: ", err)
 					continue
 				}
 				client := http.DefaultClient
 				resp, err := client.Do(req)
 				if err != nil {
-					log.Println("ERROR: 删除patientId为", patientId,"在pac server上的影像时，发送 DELETE 请求失败: ", err)
+					log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，发送 DELETE 请求失败: ", err)
 					continue
 				}
 				defer resp.Body.Close()
 
 				// 检查响应状态码
 				if resp.StatusCode != http.StatusOK {
-					log.Println("ERROR: 删除patientId为", patientId,"在pac server上的影像时，服务器返回错误状态码: ", resp.StatusCode)
+					log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，服务器返回错误状态码: ", resp.StatusCode)
 					continue
 				}
 
