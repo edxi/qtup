@@ -1,5 +1,4 @@
 name: Release
-
 on:
   create:
     tags:
@@ -7,7 +6,6 @@ on:
 jobs:
   release:
     name: Release on GitHub
-    needs: [Build]
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
