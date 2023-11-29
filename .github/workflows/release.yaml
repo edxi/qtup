@@ -1,24 +1,38 @@
-name: Release
+# .github/workflows/release.yml
+name: goreleaser
+
 on:
-  create:
+  push:
+    # run only against tags
     tags:
-      - v*
+      - "v*"
+
+permissions:
+  contents: write
+  # packages: write
+  # issues: write
+
 jobs:
-  release:
-    name: Release on GitHub
+  goreleaser:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v3
-
-      - name: Validates GO releaser config
-        uses: docker://goreleaser/goreleaser:latest
+      - uses: actions/checkout@v3
         with:
-          args: check
-
-      - name: Create release on GitHub
-        uses: docker://goreleaser/goreleaser:latest
+          fetch-depth: 0
+      - run: git fetch --force --tags
+      - uses: actions/setup-go@v4
         with:
-          args: release
+          go-version: stable
+      # More assembly might be required: Docker logins, GPG, etc.
+      # It all depends on your needs.
+      - uses: goreleaser/goreleaser-action@v5
+        with:
+          # either 'goreleaser' (default) or 'goreleaser-pro':
+          distribution: goreleaser
+          version: latest
+          args: release --clean
         env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Your GoReleaser Pro key, if you are using the 'goreleaser-pro'
+          # distribution:
+          # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
