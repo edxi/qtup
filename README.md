@@ -26,9 +26,9 @@ Usage of qtup:
   -server string
         影像上传的目标服务器，例如：https://hospital-pacs.beta.cn.xijiabrainmap.com 
          对应环境变量SERVER
-  -t int (待开发)
+  -t int
         maxthread参数的短写 (default 3)
-  -threads int （待开发）
+  -threads int
         同时上传处理的线程数。这里线程不是同一个文件多线程，是目录下多个文件同时上传。默认值3。 
          对应环境变量THREADS (default 3)
 ```
@@ -40,12 +40,13 @@ Usage of qtup:
 qtup https://pac.qtserver.local
 ```
 
+
 ```bash
 # 带所有参数
 # 上传 local-image-path目录下 的影像到 https://pac.qtserver.local服务器，最多同时5个影像一起上传，
 # 上传到服务器的影像发送到gapserver，发送后删除pac.qtserver.local服务器上的影像
 # 输出写入日志文件20231127.log
-qtup --server https://pac.qtserver.local --threads 5 --path-images local-image-path --modality-send gapserver --delete-pac true --logfile=20231127.log 
+qtup --server https://pac.qtserver.local --threads 5 --path-images local-image-path -modality-send gapserver --delete-pac --logfile=20231127.log 
 ```
 
 ```bash

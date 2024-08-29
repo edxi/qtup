@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -49,30 +50,6 @@ func apiGet(server string) {
 	if err != nil {
 		log.Fatal("解析响应失败:", err)
 	}
-
-	// 判断 JSON 数据的类型
-	// switch data[0] {
-	// case '[':
-	// 	// 数据为切片（数组）
-	// 	var sliceData []interface{}
-	// 	err = json.Unmarshal(data, &sliceData)
-	// 	if err != nil {
-	// 		log.Fatal("解析切片数据失败:", err)
-	// 	}
-	// 	log.Println("获取到的 JSON 切片数据:")
-	// 	log.Println(sliceData)
-	// case '{':
-	// 	// 数据为映射（对象）
-	// 	var mapData map[string]interface{}
-	// 	err = json.Unmarshal(data, &mapData)
-	// 	if err != nil {
-	// 		log.Fatal("解析映射数据失败:", err)
-	// 	}
-	// 	log.Println("获取到的 JSON 映射数据:")
-	// 	log.Println(mapData)
-	// default:
-	// 	log.Fatal("无法识别的 JSON 数据类型")
-	// }
 }
 
 func uploadFile(server string, filePath string) (patientId string, err error) {
@@ -220,79 +197,97 @@ func main() {
 		log.SetOutput(file)
 	}
 
+	// 创建一个缓冲通道来限制并发的上传操作
+	sem := make(chan struct{}, *threads)
+	var wg sync.WaitGroup
+
 	for _, zipfile := range zipfiles {
-		log.Println("INFO: ", zipfile, "开始上传。")
-		patientId, err := uploadFile(*server+"/instances", zipfile)
+		wg.Add(1)
+		go func(zipfile string) {
+			defer wg.Done()
+			sem <- struct{}{}        //获取一个信号量
+			defer func() { <-sem }() //释放信号量
+
+			// 处理单个文件的逻辑
+			processFile(zipfile, *server, *modality, *deletePac)
+		}(zipfile)
+	}
+
+	wg.Wait()
+}
+
+func processFile(zipfile, server, modality string, deletePac bool) {
+
+	log.Println("INFO: ", zipfile, "开始上传。")
+	patientId, err := uploadFile(server+"/instances", zipfile)
+	if err != nil {
+		return
+	}
+	log.Println("INFO: ", zipfile, "上传完成。对应patientId: ", patientId)
+	if modality != "" {
+		log.Println("INFO: 发送", zipfile, "对应的patientId为", patientId, "的影像到modality ", modality)
+		jobId, err := sentToModality(server+"/modalities/"+modality+"/store", patientId)
 		if err != nil {
-			continue
+			return
 		}
-		log.Println("INFO: ", zipfile, "上传完成。对应patientId: ", patientId)
-
-		if *modality != "" {
-			log.Println("INFO: 发送", zipfile, "对应的patientId为", patientId, "的影像到modality ", *modality)
-			jobId, err := sentToModality(*server+"/modalities/"+*modality+"/store", patientId)
+		delayAttempts, maxDelayAttempts := 0, 40
+		stateSuccess := false
+		for ; delayAttempts < maxDelayAttempts; delayAttempts++ {
+			resp, err := http.Get(server + "/jobs/" + jobId)
 			if err != nil {
-				continue
+				log.Println("ERROR: 发送到modality的job:", jobId, " 状态检查请求失败: ", err)
 			}
-			delayAttempts, maxDelayAttempts := 0, 40
-			stateSuccess := false
-			for ; delayAttempts < maxDelayAttempts; delayAttempts++ {
-				resp, err := http.Get(*server + "/jobs/" + jobId)
-				if err != nil {
-					log.Println("ERROR: 发送到modality的job:", jobId, " 状态检查请求失败: ", err)
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode != http.StatusOK {
-					log.Println("ERROR: 发送到modality的job:", jobId, " 服务器返回错误状态码:", resp.StatusCode)
-				}
-				var data map[string]interface{}
-				err = json.NewDecoder(resp.Body).Decode(&data)
-				if err != nil {
-					log.Println("ERROR: 发送到modality的job:", jobId, " 解析响应失败:", err)
-				}
-				jobState, ok := data["State"].(string)
-				if !ok {
-					log.Println("ERROR: 发送到modality的job:", jobId, " 找不到State键值")
-				}
-				if jobState == "Failure" {
-					log.Println("ERROR: 发送到modality的job:", jobId, " State 报告失败")
-					break
-				}
-				if jobState == "Success" {
-					stateSuccess = true
-					break
-				}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				log.Println("ERROR: 发送到modality的job:", jobId, " 服务器返回错误状态码:", resp.StatusCode)
+			}
+			var data map[string]interface{}
+			err = json.NewDecoder(resp.Body).Decode(&data)
+			if err != nil {
+				log.Println("ERROR: 发送到modality的job:", jobId, " 解析响应失败:", err)
+			}
+			jobState, ok := data["State"].(string)
+			if !ok {
+				log.Println("ERROR: 发送到modality的job:", jobId, " 找不到State键值")
+			}
+			if jobState == "Failure" {
+				log.Println("ERROR: 发送到modality的job:", jobId, " State 报告失败")
+				break
+			}
+			if jobState == "Success" {
+				stateSuccess = true
+				break
+			}
 
-				// 等待一段时间再发送下一次请求
-				time.Sleep(60 * time.Second)
+			// 等待一段时间再发送下一次请求
+			time.Sleep(60 * time.Second)
+		}
+		if !stateSuccess {
+			return
+		}
+		log.Println("INFO: 成功发送", zipfile, "对应的patientId为", patientId, "的影像到modality ", modality)
+		if deletePac {
+			log.Println("INFO: 开始删除", zipfile, "对应的patientId为", patientId, "在pac server上的影像")
+			req, err := http.NewRequest("DELETE", server+"/patients/"+patientId, nil)
+			if err != nil {
+				log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，创建 DELETE 请求失败: ", err)
+				return
 			}
-			if !stateSuccess {
-				continue
+			client := http.DefaultClient
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，发送 DELETE 请求失败: ", err)
+				return
 			}
-			log.Println("INFO: 成功发送", zipfile, "对应的patientId为", patientId, "的影像到modality ", *modality)
-			if *deletePac {
-				log.Println("INFO: 开始删除", zipfile, "对应的patientId为", patientId, "在pac server上的影像")
-				req, err := http.NewRequest("DELETE", *server+"/patients/"+patientId, nil)
-				if err != nil {
-					log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，创建 DELETE 请求失败: ", err)
-					continue
-				}
-				client := http.DefaultClient
-				resp, err := client.Do(req)
-				if err != nil {
-					log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，发送 DELETE 请求失败: ", err)
-					continue
-				}
-				defer resp.Body.Close()
+			defer resp.Body.Close()
 
-				// 检查响应状态码
-				if resp.StatusCode != http.StatusOK {
-					log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，服务器返回错误状态码: ", resp.StatusCode)
-					continue
-				}
-
-				log.Println("INFO: 成功删除", zipfile, "对应的patientId为", patientId, "在pac server上的影像")
+			// 检查响应状态码
+			if resp.StatusCode != http.StatusOK {
+				log.Println("ERROR: 删除patientId为", patientId, "在pac server上的影像时，服务器返回错误状态码: ", resp.StatusCode)
+				return
 			}
+
+			log.Println("INFO: 成功删除", zipfile, "对应的patientId为", patientId, "在pac server上的影像")
 		}
 	}
 }
